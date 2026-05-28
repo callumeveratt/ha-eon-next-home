@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import timedelta
 from typing import Any
 
 import aiohttp
@@ -21,13 +22,14 @@ from .const import (
     CONF_ACCOUNT_NUMBER,
     CONF_DEVICE_ID,
     CONF_REFRESH_TOKEN,
+    CONF_SCAN_INTERVAL,
     CONF_TOKEN,
     CONF_TOKEN_EXPIRY,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GRAPHQL_URL,
     QUERY_ALL_DATA,
     REFRESH_URL,
-    UPDATE_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,11 +40,12 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialise the coordinator."""
+        scan_minutes = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=UPDATE_INTERVAL,
+            update_interval=timedelta(minutes=scan_minutes),
         )
         self._entry = entry
         self._session = async_get_clientsession(hass)

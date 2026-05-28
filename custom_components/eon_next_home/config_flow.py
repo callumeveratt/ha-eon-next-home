@@ -1,4 +1,4 @@
-"""Config flow for E.ON Next EV Smart Charging."""
+"""Config flow for E.ON Next Home."""
 from __future__ import annotations
 
 import logging
@@ -9,6 +9,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -17,8 +18,11 @@ from .const import (
     AUTH_URL,
     CONF_ACCOUNT_NUMBER,
     CONF_REFRESH_TOKEN,
+    CONF_SCAN_INTERVAL,
     CONF_TOKEN,
     CONF_TOKEN_EXPIRY,
+    DEFAULT_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
     DOMAIN,
 )
 
@@ -32,10 +36,16 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-class EonNextEVConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for E.ON Next EV Smart Charging."""
+class EonNextHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for E.ON Next Home."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> EonNextHomeOptionsFlow:
+        """Return the options flow handler."""
+        return EonNextHomeOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -62,7 +72,7 @@ class EonNextEVConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(
-                    title=f"E.ON Next EV ({auth_data[CONF_ACCOUNT_NUMBER]})",
+                    title=f"E.ON Next Home ({auth_data[CONF_ACCOUNT_NUMBER]})",
                     data={
                         CONF_EMAIL: user_input[CONF_EMAIL],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
@@ -99,6 +109,37 @@ class EonNextEVConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_TOKEN_EXPIRY: body["auth"]["tokenExpiresIn"],  # Unix timestamp
             CONF_ACCOUNT_NUMBER: body["accountNumber"],
         }
+
+
+class EonNextHomeOptionsFlow(config_entries.OptionsFlow):
+    """Handle options for E.ON Next Home — shown when the user clicks Configure."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialise the options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Show the options form."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current_interval = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_SCAN_INTERVAL,
+                        default=current_interval,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+                }
+            ),
+        )
 
 
 class InvalidAuthError(Exception):

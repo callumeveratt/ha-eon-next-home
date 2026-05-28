@@ -1,4 +1,4 @@
-"""The E.ON Next EV Smart Charging integration."""
+"""The E.ON Next Home integration."""
 from __future__ import annotations
 
 import logging
@@ -20,7 +20,7 @@ PLATFORMS: list[Platform] = [
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up E.ON Next EV from a config entry."""
+    """Set up E.ON Next Home from a config entry."""
     coordinator = EonNextEVCoordinator(hass, entry)
 
     # Perform the first refresh. If this fails it raises and the entry is retried
@@ -30,6 +30,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Reload the entry whenever the user saves new options (e.g. scan interval)
+    entry.async_on_unload(entry.add_update_listener(_async_reload_on_options_change))
+
     return True
 
 
@@ -39,3 +43,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
+
+
+async def _async_reload_on_options_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the integration when the user changes options."""
+    await hass.config_entries.async_reload(entry.entry_id)

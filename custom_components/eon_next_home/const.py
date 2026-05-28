@@ -19,8 +19,10 @@ CONF_TOKEN_EXPIRY = "token_expiry"  # Unix timestamp
 CONF_ACCOUNT_NUMBER = "account_number"
 CONF_DEVICE_ID = "device_id"
 
-# How often to poll the API
-UPDATE_INTERVAL = timedelta(minutes=5)
+# Polling interval — configurable via the integration's options flow
+CONF_SCAN_INTERVAL = "scan_interval"
+DEFAULT_SCAN_INTERVAL = 5   # minutes
+MIN_SCAN_INTERVAL = 2       # hard floor — below this risks rate-limiting
 
 # ── GraphQL ────────────────────────────────────────────────────────────────────
 # Single request that fetches all data we need.

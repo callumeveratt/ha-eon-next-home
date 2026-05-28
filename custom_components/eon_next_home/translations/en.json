@@ -18,5 +18,16 @@
     "abort": {
       "already_configured": "This E.ON Next account is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "E.ON Next Home Options",
+        "description": "⚠️ Setting the scan interval too low may cause E.ON Next to rate-limit or block your account. The recommended minimum is 5 minutes.",
+        "data": {
+          "scan_interval": "Scan interval (minutes)"
+        }
+      }
+    }
   }
 }
