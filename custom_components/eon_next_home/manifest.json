@@ -1,0 +1,11 @@
+{
+  "domain": "eon_next_home",
+  "name": "E.ON Next Home",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://github.com/your-username/ha-eon-next-home",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [],
+  "iot_class": "cloud_polling"
+}
