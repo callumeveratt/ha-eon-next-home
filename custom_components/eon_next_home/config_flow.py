@@ -45,7 +45,7 @@ class EonNextHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> EonNextHomeOptionsFlow:
         """Return the options flow handler."""
-        return EonNextHomeOptionsFlow(config_entry)
+        return EonNextHomeOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -113,10 +113,6 @@ class EonNextHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class EonNextHomeOptionsFlow(config_entries.OptionsFlow):
     """Handle options for E.ON Next Home — shown when the user clicks Configure."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialise the options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
