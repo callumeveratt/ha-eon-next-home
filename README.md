@@ -48,7 +48,6 @@
 
 | Entity | Description |
 |--------|-------------|
-| Smart Charging | Enable or suspend Kraken smart charge scheduling |
 | Boost Charge | Start or cancel an immediate full-rate charge |
 
 ### 🔢 Numbers
