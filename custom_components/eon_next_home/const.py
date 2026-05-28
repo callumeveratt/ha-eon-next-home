@@ -61,10 +61,13 @@ query GetEVData($accountNumber: String!) {
 }
 """
 
-MUTATION_SET_PREFERENCES = """
-mutation SetDevicePreferences($input: SmartFlexDevicePreferencesInput!) {
-  setDevicePreferences(input: $input) {
-    __typename
+MUTATION_SAVE_VEHICLE_PREFS = """
+mutation SaveVehicleChargingPreferences($input: VehicleChargingPreferencesInput!) {
+  saveVehicleChargingPreferences(input: $input) {
+    weekdayTargetSoc
+    weekdayTargetTime
+    weekendTargetSoc
+    weekendTargetTime
   }
 }
 """

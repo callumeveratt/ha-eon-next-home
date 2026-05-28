@@ -28,7 +28,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GRAPHQL_URL,
-    MUTATION_SET_PREFERENCES,
+    MUTATION_SAVE_VEHICLE_PREFS,
     QUERY_ALL_DATA,
     REFRESH_URL,
 )
@@ -91,31 +91,22 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Write weekday/weekend ready-by times and target SoC to Kraken.
 
         Times are expected in "HH:MM" format; SoC values are whole percentages.
-        The API requires a full 7-day schedule so we expand Mon–Fri / Sat–Sun.
+        Uses the vehicleChargingPreferences-specific mutation, not the generic
+        setDevicePreferences (which is for heat pumps / batteries).
         """
-        weekday_days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
-        weekend_days = ["SATURDAY", "SUNDAY"]
-
-        # API expects Time scalar in HH:MM:SS format
-        wday_time_api = f"{weekday_time}:00" if len(weekday_time) == 5 else weekday_time
-        wend_time_api = f"{weekend_time}:00" if len(weekend_time) == 5 else weekend_time
-
-        schedules = [
-            {"dayOfWeek": day, "time": wday_time_api, "max": str(weekday_soc)}
-            for day in weekday_days
-        ] + [
-            {"dayOfWeek": day, "time": wend_time_api, "max": str(weekend_soc)}
-            for day in weekend_days
-        ]
+        # Ensure times are in HH:MM format (strip seconds if present)
+        wday_time = weekday_time[:5]
+        wend_time = weekend_time[:5]
 
         await self.async_graphql_mutation(
-            MUTATION_SET_PREFERENCES,
+            MUTATION_SAVE_VEHICLE_PREFS,
             {
                 "input": {
-                    "deviceId": self.device_id,
-                    "mode": "CHARGE",
-                    "unit": "PERCENTAGE",
-                    "schedules": schedules,
+                    "accountNumber": self.account_number,
+                    "weekdayTargetSoc": weekday_soc,
+                    "weekdayTargetTime": wday_time,
+                    "weekendTargetSoc": weekend_soc,
+                    "weekendTargetTime": wend_time,
                 }
             },
         )
