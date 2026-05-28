@@ -61,13 +61,7 @@ query GetEVData($accountNumber: String!) {
 }
 """
 
-MUTATION_SAVE_VEHICLE_PREFS = """
-mutation SaveVehicleChargingPreferences($input: VehicleChargingPreferencesInput!) {
-  saveVehicleChargingPreferences(input: $input) {
-    weekdayTargetSoc
-    weekdayTargetTime
-    weekendTargetSoc
-    weekendTargetTime
-  }
-}
-"""
+# REST endpoint for writing EV autopilot preferences (PUT, vehicle ID injected at runtime)
+# Full URL: {AUTOPILOT_URL_BASE}/{vehicleDeviceId}/smart-charging/autopilot
+# Body: { "autopilotDepartureTime": "HH:MM", "autopilotPercentage": int }
+AUTOPILOT_URL_BASE = "https://api.public.eonnext.com/apps/eonnext-home/v1/user/electric-car"

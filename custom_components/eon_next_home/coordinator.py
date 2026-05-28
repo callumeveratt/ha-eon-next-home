@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     API_KEY,
     AUTH_URL,
+    AUTOPILOT_URL_BASE,
     CONF_ACCOUNT_NUMBER,
     CONF_DEVICE_ID,
     CONF_REFRESH_TOKEN,
@@ -28,7 +29,6 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GRAPHQL_URL,
-    MUTATION_SAVE_VEHICLE_PREFS,
     QUERY_ALL_DATA,
     REFRESH_URL,
 )
@@ -81,35 +81,61 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             configuration_url="https://home.eonnext.com",
         )
 
+    @property
+    def ev_device_id(self) -> str | None:
+        """Return the REST API device ID for the EV (from the devices query)."""
+        data = self.data or {}
+        ev_device = next(
+            (
+                d
+                for d in (data.get("devices") or [])
+                if d.get("deviceType") == "ELECTRIC_VEHICLES"
+            ),
+            None,
+        )
+        return ev_device.get("id") if ev_device else None
+
     async def async_set_preferences(
         self,
-        weekday_time: str,
-        weekend_time: str,
-        weekday_soc: int,
-        weekend_soc: int,
+        departure_time: str,
+        target_soc: int,
     ) -> None:
-        """Write weekday/weekend ready-by times and target SoC to Kraken.
+        """Write autopilot departure time and target SoC via the E.ON Next REST API.
 
-        Times are expected in "HH:MM" format; SoC values are whole percentages.
-        Uses the vehicleChargingPreferences-specific mutation, not the generic
-        setDevicePreferences (which is for heat pumps / batteries).
+        Uses PUT /user/electric-car/{vehicleDeviceId}/smart-charging/autopilot.
+        departure_time must be in "HH:MM" format; target_soc is a whole percentage.
         """
-        # Ensure times are in HH:MM format (strip seconds if present)
-        wday_time = weekday_time[:5]
-        wend_time = weekend_time[:5]
+        vehicle_id = self.ev_device_id
+        if not vehicle_id:
+            raise UpdateFailed(
+                "Cannot update autopilot preferences: EV device ID not yet available"
+            )
 
-        await self.async_graphql_mutation(
-            MUTATION_SAVE_VEHICLE_PREFS,
-            {
-                "input": {
-                    "accountNumber": self.account_number,
-                    "weekdayTargetSoc": weekday_soc,
-                    "weekdayTargetTime": wday_time,
-                    "weekendTargetSoc": weekend_soc,
-                    "weekendTargetTime": wend_time,
-                }
+        # Ensure HH:MM format (strip seconds if present)
+        dep_time = departure_time[:5]
+
+        url = f"{AUTOPILOT_URL_BASE}/{vehicle_id}/smart-charging/autopilot"
+        payload = {
+            "autopilotDepartureTime": dep_time,
+            "autopilotPercentage": target_soc,
+        }
+
+        await self._ensure_valid_token()
+
+        async with self._session.put(
+            url,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "X-API-KEY": API_KEY,
+                "Content-Type": "application/json",
             },
-        )
+        ) as response:
+            if response.status in (401, 403):
+                raise ConfigEntryAuthFailed(
+                    "E.ON Next REST API rejected the token while updating autopilot preferences."
+                )
+            response.raise_for_status()
 
     async def async_graphql_mutation(
         self, mutation: str, variables: dict[str, Any]

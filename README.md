@@ -54,15 +54,13 @@
 
 | Entity | Description | Range | Category |
 |--------|-------------|-------|----------|
-| Weekday Target Charge | Target state of charge for weekdays | 10–100 % (step 5) | Config |
-| Weekend Target Charge | Target state of charge for weekends | 10–100 % (step 5) | Config |
+| Target Charge | Target state of charge for autopilot charging | 10–100 % (step 5) | Config |
 
 ### 🕐 Times
 
 | Entity | Description | Category |
 |--------|-------------|----------|
-| Weekday Ready By | Time the car should be fully charged by on weekdays | Config |
-| Weekend Ready By | Time the car should be fully charged by on weekends | Config |
+| Ready By | Time the car should be fully charged by | Config |
 
 ---
 
