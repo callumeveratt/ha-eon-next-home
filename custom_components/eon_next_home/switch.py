@@ -113,39 +113,65 @@ class EonNextEVBoostChargeSwitch(CoordinatorEntity[EonNextEVCoordinator], Switch
     _attr_icon = "mdi:battery-charging-100"
     _attr_device_class = SwitchDeviceClass.SWITCH
 
+    # Sources that indicate a boost/manual dispatch is active.
+    # "bump-charge" confirmed from live API response.
+    BOOST_SOURCES = {"bump-charge", "boost"}
+
     def __init__(self, coordinator: EonNextEVCoordinator) -> None:
         """Initialise the switch."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.account_number}_boost_charge"
         self._attr_device_info = coordinator.device_info
+        # Optimistic state: held between mutation and next coordinator refresh
+        self._optimistic_on: bool | None = None
 
     @property
     def is_on(self) -> bool | None:
         """Return True when a boost charge is active.
 
-        A boost is active when a dispatch with source 'boost' exists in the
-        planned dispatches list.
+        Uses optimistic state immediately after a mutation, then falls back to
+        API data once the coordinator refreshes.
         """
+        if self._optimistic_on is not None:
+            return self._optimistic_on
+
         if not self.coordinator.data:
             return None
+
         dispatches = self.coordinator.data.get("plannedDispatches") or []
         return any(
-            (d.get("meta") or {}).get("source", "").lower() == "boost"
+            (d.get("meta") or {}).get("source", "").lower() in self.BOOST_SOURCES
             for d in dispatches
         )
 
+    @property
+    def assumed_state(self) -> bool:
+        """Tell HA we use optimistic state so it renders correctly."""
+        return self._optimistic_on is not None
+
+    def _handle_coordinator_update(self) -> None:
+        """Clear optimistic state when fresh data arrives."""
+        self._optimistic_on = None
+        super()._handle_coordinator_update()
+
     async def async_turn_on(self, **kwargs) -> None:
         """Start a boost charge."""
+        self._optimistic_on = True
+        self.async_write_ha_state()
         await self._send("BOOST")
 
     async def async_turn_off(self, **kwargs) -> None:
         """Cancel an active boost charge."""
+        self._optimistic_on = False
+        self.async_write_ha_state()
         await self._send("CANCEL")
 
     async def _send(self, action: str) -> None:
         device_id = self.coordinator.device_id
         if not device_id:
             _LOGGER.error("Cannot update boost charge: device ID not yet available")
+            self._optimistic_on = None
+            self.async_write_ha_state()
             return
         try:
             await self.coordinator.async_graphql_mutation(
@@ -154,5 +180,8 @@ class EonNextEVBoostChargeSwitch(CoordinatorEntity[EonNextEVCoordinator], Switch
             )
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.error("Failed to set boost charge to %s: %s", action, err)
+            # Roll back optimistic state on failure
+            self._optimistic_on = None
+            self.async_write_ha_state()
             return
         await self.coordinator.async_request_refresh()
