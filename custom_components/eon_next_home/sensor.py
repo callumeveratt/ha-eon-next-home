@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfPower
+from homeassistant.const import UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -39,10 +39,6 @@ def _first_ev_device(data: dict) -> dict:
 
 def _dispatches(data: dict) -> list[dict]:
     return data.get("plannedDispatches") or []
-
-
-def _prefs(data: dict) -> dict:
-    return data.get("vehicleChargingPreferences") or {}
 
 
 def _flex(data: dict) -> dict:
@@ -100,37 +96,6 @@ SENSOR_DESCRIPTIONS: tuple[EonNextEVSensorDescription, ...] = (
             if (disp := _dispatches(d))
             else None
         ),
-    ),
-    # ── Charging preferences ──────────────────────────────────────────────────
-    EonNextEVSensorDescription(
-        key="weekday_target_soc",
-        name="Weekday Target Charge",
-        icon="mdi:battery-charging-80",
-        native_unit_of_measurement=PERCENTAGE,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: _prefs(d).get("weekdayTargetSoc"),
-    ),
-    EonNextEVSensorDescription(
-        key="weekend_target_soc",
-        name="Weekend Target Charge",
-        icon="mdi:battery-charging-80",
-        native_unit_of_measurement=PERCENTAGE,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: _prefs(d).get("weekendTargetSoc"),
-    ),
-    EonNextEVSensorDescription(
-        key="weekday_target_time",
-        name="Weekday Ready By",
-        icon="mdi:clock-outline",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: _prefs(d).get("weekdayTargetTime"),
-    ),
-    EonNextEVSensorDescription(
-        key="weekend_target_time",
-        name="Weekend Ready By",
-        icon="mdi:clock-outline",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: _prefs(d).get("weekendTargetTime"),
     ),
     # ── Hardware info (diagnostic) ────────────────────────────────────────────
     EonNextEVSensorDescription(

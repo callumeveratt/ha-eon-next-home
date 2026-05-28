@@ -33,10 +33,6 @@
 | Smart Charge Window Start | Start time of the next planned charging window | — |
 | Smart Charge Window End | End time of the last planned charging window | — |
 | Smart Charge Energy | Total kWh planned for the upcoming session | — |
-| Weekday Target Charge | Weekday target state of charge (%) | Diagnostic |
-| Weekend Target Charge | Weekend target state of charge (%) | Diagnostic |
-| Weekday Ready By | Weekday target ready-by time | Diagnostic |
-| Weekend Ready By | Weekend target ready-by time | Diagnostic |
 | Battery Capacity | Vehicle battery size (kWh) | Diagnostic |
 | Charger Max Power | Charger rated power (kW) | Diagnostic |
 
@@ -54,6 +50,20 @@
 |--------|-------------|
 | Smart Charging | Enable or suspend Kraken smart charge scheduling |
 | Boost Charge | Start or cancel an immediate full-rate charge |
+
+### 🔢 Numbers
+
+| Entity | Description | Range | Category |
+|--------|-------------|-------|----------|
+| Weekday Target Charge | Target state of charge for weekdays | 10–100 % (step 5) | Config |
+| Weekend Target Charge | Target state of charge for weekends | 10–100 % (step 5) | Config |
+
+### 🕐 Times
+
+| Entity | Description | Category |
+|--------|-------------|----------|
+| Weekday Ready By | Time the car should be fully charged by on weekdays | Config |
+| Weekend Ready By | Time the car should be fully charged by on weekends | Config |
 
 ---
 

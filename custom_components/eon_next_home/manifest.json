@@ -1,9 +1,9 @@
 {
   "domain": "eon_next_home",
   "name": "E.ON Next Home",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "config_flow": true,
-  "documentation": "https://github.com/your-username/ha-eon-next-home",
+  "documentation": "https://github.com/callumeveratt/ha-eon-next-home",
   "requirements": [],
   "dependencies": [],
   "codeowners": [],

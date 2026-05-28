@@ -1,5 +1,4 @@
 """Constants for the E.ON Next Home integration."""
-from datetime import timedelta
 
 DOMAIN = "eon_next_home"
 ATTRIBUTION = "Data provided by E.ON Next"
@@ -58,6 +57,14 @@ query GetEVData($accountNumber: String!) {
     end
     delta
     meta { source location }
+  }
+}
+"""
+
+MUTATION_SET_PREFERENCES = """
+mutation SetDevicePreferences($input: SmartFlexDevicePreferencesInput!) {
+  setDevicePreferences(input: $input) {
+    __typename
   }
 }
 """

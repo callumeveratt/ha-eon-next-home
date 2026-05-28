@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GRAPHQL_URL,
+    MUTATION_SET_PREFERENCES,
     QUERY_ALL_DATA,
     REFRESH_URL,
 )
@@ -78,6 +79,45 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             manufacturer=flex.get("chargePointMake", "E.ON Next"),
             model=flex.get("chargePointModel"),
             configuration_url="https://home.eonnext.com",
+        )
+
+    async def async_set_preferences(
+        self,
+        weekday_time: str,
+        weekend_time: str,
+        weekday_soc: int,
+        weekend_soc: int,
+    ) -> None:
+        """Write weekday/weekend ready-by times and target SoC to Kraken.
+
+        Times are expected in "HH:MM" format; SoC values are whole percentages.
+        The API requires a full 7-day schedule so we expand Mon–Fri / Sat–Sun.
+        """
+        weekday_days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
+        weekend_days = ["SATURDAY", "SUNDAY"]
+
+        # API expects Time scalar in HH:MM:SS format
+        wday_time_api = f"{weekday_time}:00" if len(weekday_time) == 5 else weekday_time
+        wend_time_api = f"{weekend_time}:00" if len(weekend_time) == 5 else weekend_time
+
+        schedules = [
+            {"dayOfWeek": day, "time": wday_time_api, "max": str(weekday_soc)}
+            for day in weekday_days
+        ] + [
+            {"dayOfWeek": day, "time": wend_time_api, "max": str(weekend_soc)}
+            for day in weekend_days
+        ]
+
+        await self.async_graphql_mutation(
+            MUTATION_SET_PREFERENCES,
+            {
+                "input": {
+                    "deviceId": self.device_id,
+                    "mode": "CHARGE",
+                    "unit": "PERCENTAGE",
+                    "schedules": schedules,
+                }
+            },
         )
 
     async def async_graphql_mutation(
