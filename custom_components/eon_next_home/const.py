@@ -61,7 +61,16 @@ query GetEVData($accountNumber: String!) {
 }
 """
 
-# REST endpoint for writing EV autopilot preferences (PUT, vehicle ID injected at runtime)
-# Full URL: {AUTOPILOT_URL_BASE}/{vehicleDeviceId}/smart-charging/autopilot
-# Body: { "autopilotDepartureTime": "HH:MM", "autopilotPercentage": int }
-AUTOPILOT_URL_BASE = "https://api.public.eonnext.com/apps/eonnext-home/v1/user/electric-car"
+# GraphQL mutation for writing EV charging preferences.
+# Requires all five fields; accountNumber is part of the input object.
+# Weekend values must be supplied but are not exposed in the E.ON Next app UI —
+# we mirror them from the current coordinator state to avoid unintended changes.
+MUTATION_SET_VEHICLE_PREFS = """
+mutation SetVehicleChargingPreferences($input: VehicleChargingPreferencesInput!) {
+  setVehicleChargePreferences(input: $input) {
+    krakenflexDevice {
+      krakenflexDeviceId
+    }
+  }
+}
+"""

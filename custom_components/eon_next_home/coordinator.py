@@ -19,7 +19,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     API_KEY,
     AUTH_URL,
-    AUTOPILOT_URL_BASE,
     CONF_ACCOUNT_NUMBER,
     CONF_DEVICE_ID,
     CONF_REFRESH_TOKEN,
@@ -29,6 +28,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GRAPHQL_URL,
+    MUTATION_SET_VEHICLE_PREFS,
     QUERY_ALL_DATA,
     REFRESH_URL,
 )
@@ -100,42 +100,30 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         departure_time: str,
         target_soc: int,
     ) -> None:
-        """Write autopilot departure time and target SoC via the E.ON Next REST API.
+        """Write autopilot departure time and target SoC via the Kraken GraphQL API.
 
-        Uses PUT /user/electric-car/{vehicleDeviceId}/smart-charging/autopilot.
+        Uses the setVehicleChargePreferences mutation.
         departure_time must be in "HH:MM" format; target_soc is a whole percentage.
+        Weekend values are read from the current coordinator state and passed through
+        unchanged (the E.ON Next app has no UI for them).
         """
-        vehicle_id = self.ev_device_id
-        if not vehicle_id:
-            raise UpdateFailed(
-                "Cannot update autopilot preferences: EV device ID not yet available"
-            )
+        # Preserve current weekend values — the mutation requires them
+        prefs: dict[str, Any] = (self.data or {}).get("vehicleChargingPreferences") or {}
+        wknd_time = (prefs.get("weekendTargetTime") or departure_time)[:5]
+        wknd_soc = int(prefs.get("weekendTargetSoc") or target_soc)
 
-        # Ensure HH:MM format (strip seconds if present)
-        dep_time = departure_time[:5]
-
-        url = f"{AUTOPILOT_URL_BASE}/{vehicle_id}/smart-charging/autopilot"
-        payload = {
-            "autopilotDepartureTime": dep_time,
-            "autopilotPercentage": target_soc,
-        }
-
-        await self._ensure_valid_token()
-
-        async with self._session.put(
-            url,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "X-API-KEY": API_KEY,
-                "Content-Type": "application/json",
+        await self.async_graphql_mutation(
+            MUTATION_SET_VEHICLE_PREFS,
+            {
+                "input": {
+                    "accountNumber": self.account_number,
+                    "weekdayTargetTime": departure_time[:5],
+                    "weekdayTargetSoc": target_soc,
+                    "weekendTargetTime": wknd_time,
+                    "weekendTargetSoc": wknd_soc,
+                }
             },
-        ) as response:
-            if response.status in (401, 403):
-                raise ConfigEntryAuthFailed(
-                    "E.ON Next REST API rejected the token while updating autopilot preferences."
-                )
-            response.raise_for_status()
+        )
 
     async def async_graphql_mutation(
         self, mutation: str, variables: dict[str, Any]
