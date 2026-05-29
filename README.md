@@ -104,9 +104,11 @@
 
 ## How it works
 
-- Data is polled on a configurable interval (default **5 minutes**, minimum 2 minutes) via the Kraken GraphQL API (`api.eonnext-kraken.energy`)
+- All reads and writes use the **Kraken GraphQL API** (`api.eonnext-kraken.energy`) — the same endpoint E.ON Next's app backend is built on
+- Data is polled on a configurable interval (default **5 minutes**, minimum 2 minutes)
 - The scan interval can be changed at any time via the **Configure** button on the integration card in **Settings → Devices & Services**
 - ⚠️ Setting the interval too low may cause E.ON Next to rate-limit or block your account — 5 minutes is the recommended minimum
+- Setting the **Target Charge** or **Ready By** entities writes back to the API immediately via the `setVehicleChargePreferences` mutation
 - Authentication uses short-lived JWT access tokens (1 hour) which are refreshed automatically using a long-lived refresh token (≈6 months)
 - If the refresh token expires, Home Assistant will prompt you to re-enter your credentials
 - All API calls are made over HTTPS
