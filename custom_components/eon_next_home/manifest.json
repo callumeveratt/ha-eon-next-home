@@ -3,9 +3,10 @@
   "name": "E.ON Next Home",
   "version": "1.1.2",
   "config_flow": true,
-  "documentation": "https://github.com/callumeveratt/ha-eon-next-home",
+  "documentation": "https://github.com/callumeveratt/ha-eon-next-home/README.md",
+  "issue_tracker": "https://github.com/callumeveratt/ha-eon-next-home/issues",
   "requirements": [],
   "dependencies": [],
-  "codeowners": [],
+  "codeowners": ["@callumeveratt"],
   "iot_class": "cloud_polling"
 }
