@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy, UnitOfPower
@@ -87,6 +88,7 @@ SENSOR_DESCRIPTIONS: tuple[EonNextEVSensorDescription, ...] = (
         name="Smart Charge Energy",
         icon="mdi:battery-charging",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=1,
         value_fn=lambda d: (
             round(sum(abs(float(x["delta"])) for x in disp if x.get("delta")), 2)
