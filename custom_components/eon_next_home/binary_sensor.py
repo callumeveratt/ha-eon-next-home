@@ -29,9 +29,9 @@ class EonNextEVBinarySensorDescription(BinarySensorEntityDescription):
 BINARY_SENSOR_DESCRIPTIONS: tuple[EonNextEVBinarySensorDescription, ...] = (
     EonNextEVBinarySensorDescription(
         key="charger_connected",
-        name="Charger Connected",
-        device_class=BinarySensorDeviceClass.PLUG,
-        # True when the Ohme charger has an active OCPP connection
+        name="Charger Online",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        # True when the Ohme charger has an active OCPP connection to E.ON Next's servers
         value_fn=lambda d: (d.get("ocppConnection") or {}).get("isConnected"),
     ),
     EonNextEVBinarySensorDescription(

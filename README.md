@@ -40,7 +40,7 @@
 
 | Entity | Description |
 |--------|-------------|
-| Charger Connected | OCPP connection status of the smart charger |
+| Charger Online | Whether the smart charger has an active connection to E.ON Next's servers |
 | Smart Charging Scheduled | Whether dispatch windows are currently planned |
 | Smart Charge Device Active | Whether the Kraken device is registered and live |
 
