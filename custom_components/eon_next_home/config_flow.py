@@ -98,7 +98,7 @@ class EonNextHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             json={"email": email, "password": password},
             headers={"X-API-KEY": API_KEY, "Content-Type": "application/json"},
         ) as response:
-            if response.status in (401, 403):
+            if response.status in (401, 403, 404):
                 raise InvalidAuthError
             response.raise_for_status()
             body = await response.json()

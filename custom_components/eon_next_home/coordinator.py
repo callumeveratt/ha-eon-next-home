@@ -170,28 +170,65 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._do_token_refresh()
 
     async def _do_token_refresh(self) -> None:
-        """Exchange the refresh token for a new access token."""
+        """Exchange the refresh token for a new access token.
+
+        Falls back to a full login with the stored credentials if the refresh
+        token is rejected. E.ON Next answers an expired/revoked refresh token
+        with 404 (not 401), so 404 is treated as a rejection too.
+        """
         try:
             async with self._session.post(
                 REFRESH_URL,
                 json={"refreshToken": self._refresh_token},
                 headers={"X-API-KEY": API_KEY, "Content-Type": "application/json"},
             ) as response:
-                if response.status in (401, 403):
-                    # Refresh token has itself expired — need the user to log in again
-                    raise ConfigEntryAuthFailed(
-                        "E.ON Next refresh token has expired. "
-                        "Please re-enter your credentials in the integration settings."
+                if response.status in (401, 403, 404):
+                    _LOGGER.debug(
+                        "E.ON Next refresh token rejected (%s); logging in again",
+                        response.status,
                     )
+                    await self._do_login()
+                    return
                 response.raise_for_status()
                 body = await response.json()
 
         except aiohttp.ClientConnectionError as err:
             raise UpdateFailed(f"Token refresh failed — connection error: {err}") from err
 
-        self._token = body["token"]
-        self._refresh_token = body["refreshToken"]
-        self._token_expiry = body["tokenExpiresIn"]
+        self._store_tokens(body["token"], body["refreshToken"], body["tokenExpiresIn"])
+        _LOGGER.debug("E.ON Next access token refreshed successfully")
+
+    async def _do_login(self) -> None:
+        """Log in with the stored email/password to obtain a fresh token pair."""
+        try:
+            async with self._session.post(
+                AUTH_URL,
+                json={
+                    "email": self._entry.data[CONF_EMAIL],
+                    "password": self._entry.data[CONF_PASSWORD],
+                },
+                headers={"X-API-KEY": API_KEY, "Content-Type": "application/json"},
+            ) as response:
+                if response.status in (401, 403, 404):
+                    raise ConfigEntryAuthFailed(
+                        "E.ON Next rejected the stored credentials. "
+                        "Please re-enter your credentials in the integration settings."
+                    )
+                response.raise_for_status()
+                body = await response.json()
+
+        except aiohttp.ClientConnectionError as err:
+            raise UpdateFailed(f"Login failed — connection error: {err}") from err
+
+        auth = body["auth"]
+        self._store_tokens(auth["token"], auth["refreshToken"], auth["tokenExpiresIn"])
+        _LOGGER.debug("E.ON Next re-login successful")
+
+    def _store_tokens(self, token: str, refresh_token: str, expiry: int) -> None:
+        """Update in-memory tokens and persist them to the config entry."""
+        self._token = token
+        self._refresh_token = refresh_token
+        self._token_expiry = expiry
 
         # Persist the new tokens so they survive an HA restart
         self.hass.config_entries.async_update_entry(
@@ -203,7 +240,6 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 CONF_TOKEN_EXPIRY: self._token_expiry,
             },
         )
-        _LOGGER.debug("E.ON Next access token refreshed successfully")
 
     # ── GraphQL ────────────────────────────────────────────────────────────────
 
