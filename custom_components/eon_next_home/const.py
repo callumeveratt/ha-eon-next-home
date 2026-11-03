@@ -11,6 +11,7 @@ CONF_TOKEN = "token"
 CONF_TOKEN_EXPIRY = "token_expiry"  # Unix timestamp
 CONF_ACCOUNT_NUMBER = "account_number"
 CONF_DEVICE_ID = "device_id"
+CONF_STATISTICS_VERSION = "statistics_version"
 
 # Polling interval — configurable via the integration's options flow
 CONF_SCAN_INTERVAL = "scan_interval"
@@ -87,9 +88,13 @@ CONSUMPTION_OVERLAP_DAYS = 3
 CONSUMPTION_BACKFILL_DAYS = 730
 # Kraken rejects pages over its limit with KT-CT-1202; 1000 is accepted.
 MEASUREMENTS_PAGE_SIZE = 1000
-# Long ranges that start on a single-rate tariff and run into a time-of-use one
-# come back without cost data after the switch. Week-long requests are always costed.
+# Long ranges that span a tariff change can come back without cost data, so
+# readings are fetched a week at a time, and a week that still lacks costs is
+# fetched again a day at a time.
 MEASUREMENTS_CHUNK_DAYS = 7
+# Bump to make every install re-import its full history once (e.g. after a
+# fix to how readings are fetched).
+STATISTICS_VERSION = 2
 
 # All rates and standing charges are in pence, VAT included.
 _TARIFF_FIELDS = "displayName productCode tariffCode standingCharge isExport"

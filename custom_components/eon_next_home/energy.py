@@ -32,6 +32,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_STATISTICS_VERSION,
     CONSUMPTION_BACKFILL_DAYS,
     CONSUMPTION_OVERLAP_DAYS,
     CONSUMPTION_SCAN_INTERVAL,
@@ -41,6 +42,7 @@ from .const import (
     MEASUREMENTS_PAGE_SIZE,
     QUERY_MEASUREMENTS,
     QUERY_TARIFFS,
+    STATISTICS_VERSION,
     TARIFF_SCAN_INTERVAL,
 )
 from .coordinator import EonNextEVCoordinator
@@ -289,12 +291,19 @@ class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | N
     async def _async_update_data(self) -> dict[str, datetime | None]:
         """Import any new readings for each fuel."""
         async with self._import_lock:
+            # Imports from an older version may have gaps, so start them again
+            full = self._entry.data.get(CONF_STATISTICS_VERSION, 1) < STATISTICS_VERSION
             latest: dict[str, datetime | None] = {}
             for fuel in self.fuels:
-                latest[fuel] = await self._async_import_fuel(fuel)
+                latest[fuel] = await self._async_import_fuel(fuel, full)
+            if full:
+                self.hass.config_entries.async_update_entry(
+                    self._entry,
+                    data={**self._entry.data, CONF_STATISTICS_VERSION: STATISTICS_VERSION},
+                )
             return latest
 
-    async def _async_import_fuel(self, fuel: str) -> datetime | None:
+    async def _async_import_fuel(self, fuel: str, full: bool) -> datetime | None:
         """Fetch readings since the last import (with overlap) and write statistics."""
         consumption_id = statistic_id(self.account_number, fuel, "consumption")
         cost_id = statistic_id(self.account_number, fuel, "cost")
@@ -304,7 +313,7 @@ class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | N
             get_last_statistics, self.hass, 1, consumption_id, True, {"sum"}
         )
         now = dt_util.utcnow()
-        if last.get(consumption_id):
+        if last.get(consumption_id) and not full:
             last_start = dt_util.utc_from_timestamp(last[consumption_id][0]["start"])
             fetch_from = last_start - timedelta(days=CONSUMPTION_OVERLAP_DAYS)
             bases = await self._async_sums_before(fetch_from, {consumption_id, cost_id})
@@ -394,12 +403,32 @@ class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | N
             chunk_start = max(start, first[0].start)
             while chunk_start < end:
                 chunk_end = min(chunk_start + timedelta(days=MEASUREMENTS_CHUNK_DAYS), end)
-                readings += await self._async_query_measurements(
+                chunk = await self._async_query_measurements(
                     property_id, fuel, chunk_start, chunk_end, MEASUREMENTS_PAGE_SIZE
                 )
+                if any(r.cost is None for r in chunk):
+                    chunk = await self._async_refetch_by_day(
+                        property_id, fuel, chunk_start, chunk_end
+                    )
+                readings += chunk
                 chunk_start = chunk_end
                 if chunk_start < end:
                     await asyncio.sleep(1)  # be gentle during a backfill
+        return readings
+
+    async def _async_refetch_by_day(
+        self, property_id: str, fuel: str, start: datetime, end: datetime
+    ) -> list[Reading]:
+        """Fetch a range one day at a time, which Kraken costs even across a tariff change."""
+        readings: list[Reading] = []
+        day_start = start
+        while day_start < end:
+            await asyncio.sleep(1)
+            day_end = min(day_start + timedelta(days=1), end)
+            readings += await self._async_query_measurements(
+                property_id, fuel, day_start, day_end, MEASUREMENTS_PAGE_SIZE
+            )
+            day_start = day_end
         return readings
 
     async def _async_query_measurements(

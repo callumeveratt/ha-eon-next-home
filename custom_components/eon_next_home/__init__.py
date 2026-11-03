@@ -49,7 +49,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Reload the entry whenever the user saves new options (e.g. scan interval)
+    # Reload the entry whenever the user saves new options (e.g. scan interval).
+    # Update listeners also fire when entry data changes, such as every token
+    # refresh, so compare the options rather than reloading on every change.
+    options = dict(entry.options)
+
+    async def _async_reload_on_options_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
+        if dict(entry.options) != options:
+            await hass.config_entries.async_reload(entry.entry_id)
+
     entry.async_on_unload(entry.add_update_listener(_async_reload_on_options_change))
 
     return True
@@ -61,11 +69,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
-
-
-async def _async_reload_on_options_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the integration when the user changes options."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 @callback
