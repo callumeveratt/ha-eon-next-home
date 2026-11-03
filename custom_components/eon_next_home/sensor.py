@@ -18,9 +18,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import ATTRIBUTION, DOMAIN
 from .coordinator import EonNextEVCoordinator
+from .energy import (
+    CURRENCY,
+    EonNextConsumptionCoordinator,
+    EonNextData,
+    EonNextTariffCoordinator,
+)
+from .energy_entity import EonNextTariffEntity
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -127,12 +135,18 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up E.ON Next EV sensor entities."""
-    coordinator: EonNextEVCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        EonNextEVSensor(coordinator, description)
-        for description in SENSOR_DESCRIPTIONS
-    )
+    """Set up E.ON Next EV and energy sensor entities."""
+    data: EonNextData = hass.data[DOMAIN][entry.entry_id]
+    entities: list[SensorEntity] = [
+        EonNextEVSensor(data.ev, description) for description in SENSOR_DESCRIPTIONS
+    ]
+    for fuel in data.consumption.fuels:
+        entities += [
+            EonNextRateSensor(data.tariffs, fuel),
+            EonNextStandingChargeSensor(data.tariffs, fuel),
+            EonNextDataUpToSensor(data.consumption, fuel),
+        ]
+    async_add_entities(entities)
 
 
 class EonNextEVSensor(CoordinatorEntity[EonNextEVCoordinator], SensorEntity):
@@ -162,3 +176,96 @@ class EonNextEVSensor(CoordinatorEntity[EonNextEVCoordinator], SensorEntity):
             return self.entity_description.value_fn(self.coordinator.data)
         except (KeyError, TypeError, ValueError):
             return None
+
+
+# ── Energy ─────────────────────────────────────────────────────────────────────
+
+
+class EonNextRateSensor(EonNextTariffEntity, SensorEntity):
+    """The unit rate that applies right now, in GBP/kWh."""
+
+    _attr_icon = "mdi:currency-gbp"
+    _attr_native_unit_of_measurement = f"{CURRENCY}/{UnitOfEnergy.KILO_WATT_HOUR}"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 4
+
+    def __init__(self, coordinator: EonNextTariffCoordinator, fuel: str) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, fuel, "current_rate")
+        self._attr_name = f"{fuel.capitalize()} Current Rate"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the rate for the current time."""
+        return self.tariff.rate_at(dt_util.utcnow()) if self.tariff else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Tariff details and the upcoming time-of-use windows."""
+        tariff = self.tariff
+        if not tariff:
+            return None
+        now = dt_util.utcnow()
+        attrs: dict[str, Any] = {
+            "tariff_name": tariff.display_name,
+            "tariff_code": tariff.tariff_code,
+            "product_code": tariff.product_code,
+        }
+        if tariff.windows:
+            current = tariff.window_at(now)
+            later = [w for w in tariff.upcoming(now) if w.start >= (current.end if current else now)]
+            attrs.update(
+                {
+                    "current_rate_ends": current.end.isoformat() if current else None,
+                    "next_rate": later[0].rate if later else None,
+                    "off_peak_rate": tariff.off_peak_rate,
+                    "rates": [
+                        {"start": w.start.isoformat(), "end": w.end.isoformat(), "rate": w.rate}
+                        for w in tariff.upcoming(now)
+                    ],
+                }
+            )
+        return attrs
+
+
+class EonNextStandingChargeSensor(EonNextTariffEntity, SensorEntity):
+    """The daily standing charge, in GBP/day."""
+
+    _attr_icon = "mdi:cash-clock"
+    _attr_native_unit_of_measurement = f"{CURRENCY}/day"
+    _attr_suggested_display_precision = 4
+
+    def __init__(self, coordinator: EonNextTariffCoordinator, fuel: str) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, fuel, "standing_charge")
+        self._attr_name = f"{fuel.capitalize()} Standing Charge"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the standing charge."""
+        return self.tariff.standing_charge if self.tariff else None
+
+
+class EonNextDataUpToSensor(CoordinatorEntity[EonNextConsumptionCoordinator], SensorEntity):
+    """The end of the latest half-hour E.ON Next has supplied a reading for."""
+
+    _attr_attribution = ATTRIBUTION
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:meter-electric"
+
+    def __init__(self, coordinator: EonNextConsumptionCoordinator, fuel: str) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator)
+        self.fuel = fuel
+        self._attr_name = f"{fuel.capitalize()} Readings Up To"
+        self._attr_unique_id = f"{coordinator.account_number}_{fuel}_readings_up_to"
+        self._attr_device_info = coordinator.device_info
+        if fuel == "gas":
+            self._attr_icon = "mdi:meter-gas"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return when the latest reading ends."""
+        return (self.coordinator.data or {}).get(self.fuel)

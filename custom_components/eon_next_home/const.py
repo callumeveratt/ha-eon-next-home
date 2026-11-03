@@ -76,6 +76,101 @@ query GetEVData($accountNumber: String!) {
 }
 """
 
+# ── Energy (meter readings and tariffs) ────────────────────────────────────────
+# Tariffs change rarely; unitRates on a half-hourly tariff covers today and tomorrow.
+TARIFF_SCAN_INTERVAL = 60  # minutes
+# Meter readings arrive as a daily batch 1–2 days late, so polling often is pointless.
+CONSUMPTION_SCAN_INTERVAL = 120  # minutes
+# Each run re-imports this many days so late or corrected half-hours are picked up.
+CONSUMPTION_OVERLAP_DAYS = 3
+# How far back the first import looks. The API simply returns nothing before supply start.
+CONSUMPTION_BACKFILL_DAYS = 730
+# Kraken rejects pages over its limit with KT-CT-1202; 1000 is accepted.
+MEASUREMENTS_PAGE_SIZE = 1000
+# Long ranges that start on a single-rate tariff and run into a time-of-use one
+# come back without cost data after the switch. Week-long requests are always costed.
+MEASUREMENTS_CHUNK_DAYS = 7
+
+# All rates and standing charges are in pence, VAT included.
+_TARIFF_FIELDS = "displayName productCode tariffCode standingCharge isExport"
+
+QUERY_TARIFFS = f"""
+query GetTariffs($accountNumber: String!) {{
+  account(accountNumber: $accountNumber) {{
+    properties {{
+      id
+    }}
+    electricityAgreements(active: true) {{
+      validFrom
+      validTo
+      tariff {{
+        __typename
+        ... on StandardTariff {{ {_TARIFF_FIELDS} unitRate }}
+        ... on HalfHourlyTariff {{ {_TARIFF_FIELDS} unitRates {{ validFrom validTo value }} }}
+        ... on DayNightTariff {{ {_TARIFF_FIELDS} }}
+        ... on ThreeRateTariff {{ {_TARIFF_FIELDS} }}
+        ... on FourRateEvTariff {{ {_TARIFF_FIELDS} }}
+        ... on PrepayTariff {{ {_TARIFF_FIELDS} }}
+      }}
+    }}
+    gasAgreements(active: true) {{
+      validFrom
+      validTo
+      tariff {{ {_TARIFF_FIELDS} unitRate }}
+    }}
+  }}
+}}
+"""
+
+# Half-hourly readings with E.ON Next's own costing. Values are kWh (gas is
+# converted from m³ by Kraken); costInclTax.estimatedAmount is in pence despite
+# being labelled GBP.
+QUERY_MEASUREMENTS = """
+query GetMeasurements(
+  $propertyId: ID!, $startAt: DateTime!, $endAt: DateTime!,
+  $filters: [UtilityFiltersInput], $first: Int!, $after: String
+) {
+  property(id: $propertyId) {
+    measurements(
+      startAt: $startAt, endAt: $endAt, timezone: "Europe/London",
+      utilityFilters: $filters, first: $first, after: $after
+    ) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      edges {
+        node {
+          value
+          ... on IntervalMeasurementType {
+            startAt
+            endAt
+          }
+          metaData {
+            statistics {
+              type
+              costInclTax {
+                estimatedAmount
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+MEASUREMENT_FILTERS = {
+    "electricity": {
+        "electricityFilters": {
+            "readingFrequencyType": "THIRTY_MIN_INTERVAL",
+            "readingDirection": "CONSUMPTION",
+        }
+    },
+    "gas": {"gasFilters": {"readingFrequencyType": "THIRTY_MIN_INTERVAL"}},
+}
+
 # GraphQL mutation for writing EV charging preferences.
 # Requires all five fields; accountNumber is part of the input object.
 # Weekend values must be supplied but are not exposed in the E.ON Next app UI —

@@ -5,10 +5,11 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
 from .coordinator import EonNextEVCoordinator
+from .energy import EonNextConsumptionCoordinator, EonNextData, EonNextTariffCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +30,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # later rather than silently adding entities with no data.
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    # Tariffs decide which energy entities exist (e.g. gas), so load them first too
+    tariffs = EonNextTariffCoordinator(hass, coordinator)
+    await tariffs.async_config_entry_first_refresh()
+
+    consumption = EonNextConsumptionCoordinator(hass, entry, coordinator, tariffs)
+    # Keep the statistics import running even if the "data up to" sensors are
+    # disabled; a coordinator with no listeners stops polling.
+    entry.async_on_unload(consumption.async_add_listener(_noop))
+    # The first run may backfill months of readings, so don't hold up setup for it
+    entry.async_create_background_task(
+        hass, consumption.async_refresh(), f"{DOMAIN}_consumption_import"
+    )
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = EonNextData(
+        ev=coordinator, tariffs=tariffs, consumption=consumption
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -50,3 +66,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_reload_on_options_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the integration when the user changes options."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+@callback
+def _noop() -> None:
+    """Coordinator listener that does nothing."""

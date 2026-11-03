@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for E.ON Next EV Smart Charging."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import timedelta
@@ -56,6 +57,8 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._api_key: str | None = entry.data.get(CONF_API_KEY)
         self._token: str = entry.data.get(CONF_TOKEN, "")
         self._token_expiry: int = entry.data.get(CONF_TOKEN_EXPIRY, 0)  # Unix timestamp
+        # The energy coordinators share this token, so refreshes must not race
+        self._token_lock = asyncio.Lock()
 
     # ── Public helpers ─────────────────────────────────────────────────────────
 
@@ -151,22 +154,28 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch a fresh snapshot from the Kraken GraphQL API."""
-        try:
-            await self._ensure_valid_token()
-            return await self._graphql_query()
-        except ConfigEntryAuthFailed:
-            raise
-        except aiohttp.ClientConnectionError as err:
-            raise UpdateFailed(f"Cannot connect to E.ON Next: {err}") from err
-        except aiohttp.ClientResponseError as err:
-            raise UpdateFailed(f"E.ON Next API error {err.status}: {err.message}") from err
+        data = await self.async_graphql_query(
+            QUERY_ALL_DATA, {"accountNumber": self.account_number}
+        )
+
+        # Cache the device ID in the config entry on first successful fetch
+        flex_device = data.get("registeredKrakenflexDevice")
+        if flex_device and not self.device_id:
+            self.device_id = flex_device.get("krakenflexDeviceId")
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                data={**self._entry.data, CONF_DEVICE_ID: self.device_id},
+            )
+
+        return data
 
     # ── Token management ───────────────────────────────────────────────────────
 
     async def _ensure_valid_token(self) -> None:
         """Proactively fetch a new access token if it expires within 5 minutes."""
-        if time.time() >= self._token_expiry - 300:
-            await self._do_token_refresh()
+        async with self._token_lock:
+            if time.time() >= self._token_expiry - 300:
+                await self._do_token_refresh()
 
     async def _do_token_refresh(self) -> None:
         """Exchange the stored API key for a new Kraken token."""
@@ -201,12 +210,29 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # ── GraphQL ────────────────────────────────────────────────────────────────
 
-    async def _graphql_query(self) -> dict[str, Any]:
-        """Run QUERY_ALL_DATA and return the data dict."""
-        payload = {
-            "query": QUERY_ALL_DATA,
-            "variables": {"accountNumber": self.account_number},
-        }
+    async def async_graphql_query(
+        self, query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Run a GraphQL query with a valid token and return the data dict.
+
+        Shared by the EV and energy coordinators. Raises UpdateFailed on API or
+        connection errors and ConfigEntryAuthFailed if the API key is rejected.
+        """
+        try:
+            await self._ensure_valid_token()
+            return await self._graphql_query(query, variables or {}, retried=False)
+        except ConfigEntryAuthFailed:
+            raise
+        except aiohttp.ClientConnectionError as err:
+            raise UpdateFailed(f"Cannot connect to E.ON Next: {err}") from err
+        except aiohttp.ClientResponseError as err:
+            raise UpdateFailed(f"E.ON Next API error {err.status}: {err.message}") from err
+
+    async def _graphql_query(
+        self, query: str, variables: dict[str, Any], retried: bool
+    ) -> dict[str, Any]:
+        """POST a query, refreshing the token once if Kraken rejects it."""
+        payload = {"query": query, "variables": variables}
         headers = {
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
@@ -215,39 +241,25 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async with self._session.post(
             GRAPHQL_URL, json=payload, headers=headers
         ) as response:
-            if response.status == 401:
+            if response.status == 401 and not retried:
                 # Token rejected mid-session — refresh once and retry
                 _LOGGER.debug("Got 401 from GraphQL; refreshing token and retrying")
-                await self._do_token_refresh()
-                headers["Authorization"] = f"Bearer {self._token}"
-                async with self._session.post(
-                    GRAPHQL_URL, json=payload, headers=headers
-                ) as retry:
-                    retry.raise_for_status()
-                    result = await retry.json()
-            else:
-                response.raise_for_status()
-                result = await response.json()
+                async with self._token_lock:
+                    await self._do_token_refresh()
+                return await self._graphql_query(query, variables, retried=True)
+            response.raise_for_status()
+            result = await response.json()
 
         if "errors" in result:
             # Check specifically for JWT expiry errors and retry once
-            for error in result["errors"]:
-                if "expired" in error.get("message", "").lower():
-                    _LOGGER.debug("JWT expired in GraphQL error; refreshing and retrying")
+            if not retried and any(
+                "expired" in error.get("message", "").lower() for error in result["errors"]
+            ):
+                _LOGGER.debug("JWT expired in GraphQL error; refreshing and retrying")
+                async with self._token_lock:
                     await self._do_token_refresh()
-                    return await self._graphql_query()
+                return await self._graphql_query(query, variables, retried=True)
             msgs = [e.get("message", "unknown") for e in result["errors"]]
             raise UpdateFailed(f"GraphQL errors: {'; '.join(msgs)}")
 
-        data: dict[str, Any] = result.get("data", {})
-
-        # Cache the device ID in the config entry on first successful fetch
-        flex_device = data.get("registeredKrakenflexDevice")
-        if flex_device and not self.device_id:
-            self.device_id = flex_device.get("krakenflexDeviceId")
-            self.hass.config_entries.async_update_entry(
-                self._entry,
-                data={**self._entry.data, CONF_DEVICE_ID: self.device_id},
-            )
-
-        return data
+        return result.get("data", {})

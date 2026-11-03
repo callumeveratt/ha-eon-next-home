@@ -9,7 +9,7 @@
   <a href="https://github.com/hacs/integration"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS Custom"/></a>
   <a href="https://github.com/callumeveratt/ha-eon-next-home/releases"><img src="https://img.shields.io/github/v/release/callumeveratt/ha-eon-next-home" alt="GitHub Release"/></a>
   <a href="https://github.com/callumeveratt/ha-eon-next-home/blob/master/LICENSE"><img src="https://img.shields.io/github/license/callumeveratt/ha-eon-next-home" alt="License"/></a>
-  <img src="https://img.shields.io/badge/HA-2023.1%2B-blue" alt="Home Assistant 2023.1+"/>
+  <img src="https://img.shields.io/badge/HA-2025.11%2B-blue" alt="Home Assistant 2025.11+"/>
 </p>
 
 ---
@@ -18,11 +18,24 @@
 > This integration uses the **private E.ON Next / Kraken API**, reverse-engineered from the E.ON Next Home mobile app. It is not officially supported or endorsed by E.ON Next. It may break without warning if E.ON Next updates their app or API.
 
 > [!NOTE]
-> E.ON Next's smart charging backend is built on [Octopus Energy's Kraken platform](https://kraken.tech) — the same technology behind Intelligent Octopus Go. This integration currently covers **EV smart charging**. Solar and energy management support may be added in future.
+> E.ON Next's smart charging backend is built on [Octopus Energy's Kraken platform](https://kraken.tech) — the same technology behind Intelligent Octopus Go. This integration covers **EV smart charging**, **smart meter usage and cost** for the Energy dashboard, and **tariff rates**.
 
 ---
 
 ## Features
+
+### ⚡ Energy dashboard
+
+If you have a smart meter, the integration imports your half-hourly electricity and gas usage, and what E.ON Next charged for it, into Home Assistant's long-term statistics. No extra hardware is needed.
+
+E.ON Next only receives meter readings once a day, so the data is **1–2 days behind**. That's why it's imported as statistics against the half-hour it belongs to, rather than as a live sensor. On first setup it backfills everything back to when your E.ON Next supply started, which can take a minute. After that it checks for new readings every 2 hours, and re-imports the last 3 days each time so late or corrected readings are picked up.
+
+To use it, go to **Settings → Dashboards → Energy**:
+
+1. Under **Electricity grid → Add consumption**, choose **E.ON Next Electricity Consumption**. Under cost, pick **Use an entity tracking the total costs** and choose **E.ON Next Electricity Cost**
+2. Under **Gas consumption**, choose **E.ON Next Gas Consumption** and **E.ON Next Gas Cost** the same way
+
+Costs are E.ON Next's own half-hourly figures at your tariff's rates, VAT included. They don't include the standing charge. Recent days will be empty until E.ON Next receives the readings.
 
 ### 🔋 Sensors
 
@@ -35,6 +48,12 @@
 | Smart Charge Energy | Total kWh planned for the upcoming session | — |
 | Battery Capacity | Vehicle battery size (kWh) | Diagnostic |
 | Charger Max Power | Charger rated power (kW) | Diagnostic |
+| Electricity Current Rate | Unit rate right now (GBP/kWh, inc. VAT). Attributes list the upcoming time-of-use windows | — |
+| Electricity Standing Charge | Daily standing charge (GBP/day, inc. VAT) | — |
+| Electricity Readings Up To | End of the latest half-hour E.ON Next has a reading for | Diagnostic |
+| Gas Current Rate / Standing Charge / Readings Up To | As above, for gas (only if you have gas with E.ON Next) | — |
+
+On time-of-use tariffs such as Next Drive, the current rate changes at the exact start and end of each window, including around the clocks changing. Day/night (Economy 7) tariffs aren't supported for rate sensors yet. Usage and cost import still works on those tariffs.
 
 ### 💡 Binary Sensors
 
@@ -43,6 +62,7 @@
 | Charger Online | Whether the smart charger has an active connection to E.ON Next's servers |
 | Smart Charging Scheduled | Whether dispatch windows are currently planned |
 | Smart Charge Device Active | Whether the Kraken device is registered and live |
+| Electricity Off-Peak | On during the tariff's cheapest window (e.g. 00:00–06:00 on Next Drive). Only created on time-of-use tariffs |
 
 ### 🔘 Switches
 
@@ -116,16 +136,17 @@ After updating, Home Assistant will show a **Re-authenticate** card for E.ON Nex
 
 ## Requirements
 
-- An E.ON Next account with an EV registered for smart charging
-- A compatible smart charger connected to the E.ON Next Home app (e.g. Ohme Home Pro)
-- Home Assistant **2024.11** or newer
+- An E.ON Next account
+- For EV features: an EV registered for smart charging, with a compatible smart charger connected to the E.ON Next Home app (e.g. Ohme Home Pro)
+- For the Energy dashboard: a smart meter sending half-hourly readings
+- Home Assistant **2025.11** or newer (needed for the long-term statistics import)
 
 ---
 
 ## How it works
 
 - All reads and writes use the **Kraken GraphQL API** (`api.eonnext-kraken.energy`) — the same endpoint E.ON Next's app backend is built on
-- Data is polled on a configurable interval (default **5 minutes**, minimum 2 minutes)
+- EV data is polled on a configurable interval (default **5 minutes**, minimum 2 minutes). Tariffs are refreshed hourly and meter readings every 2 hours
 - The scan interval can be changed at any time via the **Configure** button on the integration card in **Settings → Devices & Services**
 - ⚠️ Setting the interval too low may cause E.ON Next to rate-limit or block your account — 5 minutes is the recommended minimum
 - Setting the **Target Charge** or **Ready By** entities writes back to the API immediately via the `setVehicleChargePreferences` mutation
@@ -137,7 +158,7 @@ After updating, Home Assistant will show a **Re-authenticate** card for E.ON Nex
 
 ## Contributions
 
-Pull requests are welcome. If you find a bug or want to request a feature (e.g. gas usage, solar, tariff data), please open an [issue](https://github.com/callumeveratt/ha-eon-next-home/issues).
+Pull requests are welcome. If you find a bug or want to request a feature (e.g. solar or export), please open an [issue](https://github.com/callumeveratt/ha-eon-next-home/issues).
 
 ---
 

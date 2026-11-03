@@ -6,7 +6,7 @@
   "documentation": "https://github.com/callumeveratt/ha-eon-next-home/README.md",
   "issue_tracker": "https://github.com/callumeveratt/ha-eon-next-home/issues",
   "requirements": [],
-  "dependencies": [],
+  "dependencies": ["recorder"],
   "codeowners": ["@callumeveratt"],
   "iot_class": "cloud_polling"
 }

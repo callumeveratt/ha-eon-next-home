@@ -14,9 +14,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import ATTRIBUTION, DOMAIN
 from .coordinator import EonNextEVCoordinator
+from .energy import EonNextData, EonNextTariffCoordinator
+from .energy_entity import EonNextTariffEntity
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -58,12 +61,16 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up E.ON Next EV binary sensor entities."""
-    coordinator: EonNextEVCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        EonNextEVBinarySensor(coordinator, description)
+    """Set up E.ON Next EV and energy binary sensor entities."""
+    data: EonNextData = hass.data[DOMAIN][entry.entry_id]
+    entities: list[BinarySensorEntity] = [
+        EonNextEVBinarySensor(data.ev, description)
         for description in BINARY_SENSOR_DESCRIPTIONS
-    )
+    ]
+    electricity = (data.tariffs.data or {}).get("electricity")
+    if electricity and electricity.is_time_of_use:
+        entities.append(EonNextOffPeakBinarySensor(data.tariffs))
+    async_add_entities(entities)
 
 
 class EonNextEVBinarySensor(CoordinatorEntity[EonNextEVCoordinator], BinarySensorEntity):
@@ -93,3 +100,23 @@ class EonNextEVBinarySensor(CoordinatorEntity[EonNextEVCoordinator], BinarySenso
             return self.entity_description.value_fn(self.coordinator.data)
         except (KeyError, TypeError):
             return None
+
+
+class EonNextOffPeakBinarySensor(EonNextTariffEntity, BinarySensorEntity):
+    """On while the electricity rate is the tariff's cheapest (e.g. Next Drive 00:00–06:00)."""
+
+    _attr_icon = "mdi:clock-time-twelve-outline"
+
+    def __init__(self, coordinator: EonNextTariffCoordinator) -> None:
+        """Initialise the binary sensor."""
+        super().__init__(coordinator, "electricity", "off_peak")
+        self._attr_name = "Electricity Off-Peak"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True during the cheapest rate window."""
+        tariff = self.tariff
+        if not tariff or tariff.off_peak_rate is None:
+            return None
+        rate = tariff.rate_at(dt_util.utcnow())
+        return None if rate is None else rate <= tariff.off_peak_rate

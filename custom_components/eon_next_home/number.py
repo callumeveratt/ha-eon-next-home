@@ -25,7 +25,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up E.ON Next EV number entities."""
-    coordinator: EonNextEVCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: EonNextEVCoordinator = hass.data[DOMAIN][entry.entry_id].ev
     async_add_entities([EonNextEVSocNumber(coordinator)])
 
 
