@@ -10,3 +10,6 @@ __pycache__/
 # Windows
 Thumbs.db
 desktop.ini
+
+# Probe output (redacted API responses)
+scripts/probe/output/
