@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
@@ -86,6 +87,57 @@ class EonNextHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> FlowResult:
+        """Start reauth when the coordinator raises ConfigEntryAuthFailed."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask the user to re-enter their credentials."""
+        errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            try:
+                auth_data = await self._authenticate(
+                    user_input[CONF_EMAIL],
+                    user_input[CONF_PASSWORD],
+                )
+            except aiohttp.ClientConnectionError:
+                errors["base"] = "cannot_connect"
+            except InvalidAuthError:
+                errors["base"] = "invalid_auth"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception during E.ON Next reauthentication")
+                errors["base"] = "unknown"
+            else:
+                # Don't let the user swap the entry over to a different account
+                await self.async_set_unique_id(auth_data[CONF_ACCOUNT_NUMBER])
+                self._abort_if_unique_id_mismatch(reason="wrong_account")
+
+                return self.async_update_reload_and_abort(
+                    reauth_entry,
+                    data_updates={
+                        CONF_EMAIL: user_input[CONF_EMAIL],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        CONF_TOKEN: auth_data[CONF_TOKEN],
+                        CONF_REFRESH_TOKEN: auth_data[CONF_REFRESH_TOKEN],
+                        CONF_TOKEN_EXPIRY: auth_data[CONF_TOKEN_EXPIRY],
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_USER_DATA_SCHEMA,
+                {CONF_EMAIL: reauth_entry.data.get(CONF_EMAIL)},
+            ),
             errors=errors,
         )
 

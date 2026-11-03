@@ -8,6 +8,14 @@
           "email": "Email address",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate E.ON Next Home",
+        "description": "E.ON Next no longer accepts the saved login. Enter your E.ON Next email address and password to reconnect.",
+        "data": {
+          "email": "Email address",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -16,7 +24,9 @@
       "unknown": "An unexpected error occurred. Please check the Home Assistant logs for details."
     },
     "abort": {
-      "already_configured": "This E.ON Next account is already configured."
+      "already_configured": "This E.ON Next account is already configured.",
+      "reauth_successful": "Re-authentication was successful.",
+      "wrong_account": "These credentials belong to a different E.ON Next account. Sign in with the account this integration was set up with."
     }
   },
   "options": {
