@@ -87,10 +87,30 @@
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **E.ON Next Home**
-3. Enter your E.ON Next account **email** and **password**
+3. Enter your E.ON Next account **API key** (starts with `sk_live_`)
 4. Click **Submit** — the integration will authenticate and discover your account
 
-> Your credentials are stored locally in Home Assistant's encrypted config store and are only used to authenticate with the E.ON Next API.
+> Your API key is stored locally in Home Assistant's config store and is only used to authenticate with the E.ON Next API.
+
+### Getting your API key
+
+In October 2026 E.ON Next moved sign-in to a new verification-code login and stopped accepting email and password from integrations. You now need an account API key. E.ON Next's website doesn't display it, so this repo includes a small script that reads it, or creates one, using your signed-in browser session:
+
+1. Sign in at [eonnext.com](https://www.eonnext.com) and open your browser's developer tools (F12) on the **Network** tab
+2. Click around your account until a request to `api.eonnext-kraken.energy/v1/graphql/` appears, and copy the value of its **Authorization** request header (it's valid for about an hour)
+3. Run the script and paste the header when asked:
+
+   ```bash
+   python scripts/get_api_key.py
+   ```
+
+4. Copy the `sk_live_…` key it prints into Home Assistant
+
+An account has **one** live API key. If you already use one elsewhere (e.g. Predbat or EnergyDock), use that same key. Creating a new one stops the old key working everywhere.
+
+### Upgrading from 1.1.4 or earlier
+
+After updating, Home Assistant will show a **Re-authenticate** card for E.ON Next Home under **Settings → Devices & Services**. Enter your API key there. Your entities and history are kept, and the old saved email and password are removed.
 
 ---
 
@@ -98,7 +118,7 @@
 
 - An E.ON Next account with an EV registered for smart charging
 - A compatible smart charger connected to the E.ON Next Home app (e.g. Ohme Home Pro)
-- Home Assistant **2023.1** or newer
+- Home Assistant **2024.11** or newer
 
 ---
 
@@ -109,8 +129,8 @@
 - The scan interval can be changed at any time via the **Configure** button on the integration card in **Settings → Devices & Services**
 - ⚠️ Setting the interval too low may cause E.ON Next to rate-limit or block your account — 5 minutes is the recommended minimum
 - Setting the **Target Charge** or **Ready By** entities writes back to the API immediately via the `setVehicleChargePreferences` mutation
-- Authentication uses short-lived JWT access tokens (1 hour) which are refreshed automatically using a long-lived refresh token (≈6 months)
-- If the refresh token expires, Home Assistant will prompt you to re-enter your credentials
+- Authentication exchanges your API key for short-lived Kraken access tokens (≈1 hour), which are renewed automatically
+- If E.ON Next rejects the API key (e.g. it was replaced by generating a new one), Home Assistant will prompt you to enter the new key
 - All API calls are made over HTTPS
 
 ---

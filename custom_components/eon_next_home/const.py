@@ -3,16 +3,10 @@
 DOMAIN = "eon_next_home"
 ATTRIBUTION = "Data provided by E.ON Next"
 
-# REST auth endpoints (E.ON Next wrapper)
-AUTH_URL = "https://api.public.eonnext.com/apps/eonnext-home/v1/user/login"
-REFRESH_URL = "https://api.public.eonnext.com/apps/eonnext-home/v1/user/login/refresh"
-API_KEY = "f8897b3c25c1bbd655962233ebcab48f"
-
-# Kraken GraphQL endpoint
+# Kraken GraphQL endpoint (used for auth and data)
 GRAPHQL_URL = "https://api.eonnext-kraken.energy/v1/graphql/"
 
-# Config entry data keys (in addition to CONF_EMAIL / CONF_PASSWORD from HA)
-CONF_REFRESH_TOKEN = "refresh_token"
+# Config entry data keys (in addition to CONF_API_KEY from HA)
 CONF_TOKEN = "token"
 CONF_TOKEN_EXPIRY = "token_expiry"  # Unix timestamp
 CONF_ACCOUNT_NUMBER = "account_number"
@@ -24,6 +18,27 @@ DEFAULT_SCAN_INTERVAL = 5   # minutes
 MIN_SCAN_INTERVAL = 2       # hard floor — below this risks rate-limiting
 
 # ── GraphQL ────────────────────────────────────────────────────────────────────
+# E.ON Next moved customer sign-in to Auth0 in Oct 2026 and removed email/password
+# from obtainKrakenToken, so we authenticate with the account's live API key.
+MUTATION_OBTAIN_TOKEN = """
+mutation ObtainKrakenToken($input: ObtainJSONWebTokenInput!) {
+  obtainKrakenToken(input: $input) {
+    token
+    payload
+  }
+}
+"""
+
+QUERY_ACCOUNTS = """
+query {
+  viewer {
+    accounts {
+      number
+    }
+  }
+}
+"""
+
 # Single request that fetches all data we need.
 QUERY_ALL_DATA = """
 query GetEVData($accountNumber: String!) {

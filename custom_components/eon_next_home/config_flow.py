@@ -9,16 +9,15 @@ import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.const import CONF_API_KEY
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .auth import InvalidAuthError, async_get_account_number, async_obtain_token
 from .const import (
-    API_KEY,
-    AUTH_URL,
     CONF_ACCOUNT_NUMBER,
-    CONF_REFRESH_TOKEN,
+    CONF_DEVICE_ID,
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
     CONF_TOKEN_EXPIRY,
@@ -31,8 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_EMAIL): str,
-        vol.Required(CONF_PASSWORD): str,
+        vol.Required(CONF_API_KEY): str,
     }
 )
 
@@ -51,37 +49,19 @@ class EonNextHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step — ask for email and password."""
+        """Handle the initial step — ask for the account API key."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            try:
-                auth_data = await self._authenticate(
-                    user_input[CONF_EMAIL],
-                    user_input[CONF_PASSWORD],
-                )
-            except aiohttp.ClientConnectionError:
-                errors["base"] = "cannot_connect"
-            except InvalidAuthError:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception during E.ON Next authentication")
-                errors["base"] = "unknown"
-            else:
+            auth_data = await self._try_authenticate(user_input[CONF_API_KEY], errors)
+            if auth_data is not None:
                 # Prevent the same account being added twice
                 await self.async_set_unique_id(auth_data[CONF_ACCOUNT_NUMBER])
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(
                     title=f"E.ON Next Home ({auth_data[CONF_ACCOUNT_NUMBER]})",
-                    data={
-                        CONF_EMAIL: user_input[CONF_EMAIL],
-                        CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        CONF_TOKEN: auth_data[CONF_TOKEN],
-                        CONF_REFRESH_TOKEN: auth_data[CONF_REFRESH_TOKEN],
-                        CONF_TOKEN_EXPIRY: auth_data[CONF_TOKEN_EXPIRY],
-                        CONF_ACCOUNT_NUMBER: auth_data[CONF_ACCOUNT_NUMBER],
-                    },
+                    data=auth_data,
                 )
 
         return self.async_show_form(
@@ -99,68 +79,55 @@ class EonNextHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Ask the user to re-enter their credentials."""
+        """Ask the user for a (new) account API key."""
         errors: dict[str, str] = {}
         reauth_entry = self._get_reauth_entry()
 
         if user_input is not None:
-            try:
-                auth_data = await self._authenticate(
-                    user_input[CONF_EMAIL],
-                    user_input[CONF_PASSWORD],
-                )
-            except aiohttp.ClientConnectionError:
-                errors["base"] = "cannot_connect"
-            except InvalidAuthError:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception during E.ON Next reauthentication")
-                errors["base"] = "unknown"
-            else:
+            auth_data = await self._try_authenticate(user_input[CONF_API_KEY], errors)
+            if auth_data is not None:
                 # Don't let the user swap the entry over to a different account
                 await self.async_set_unique_id(auth_data[CONF_ACCOUNT_NUMBER])
                 self._abort_if_unique_id_mismatch(reason="wrong_account")
 
-                return self.async_update_reload_and_abort(
-                    reauth_entry,
-                    data_updates={
-                        CONF_EMAIL: user_input[CONF_EMAIL],
-                        CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        CONF_TOKEN: auth_data[CONF_TOKEN],
-                        CONF_REFRESH_TOKEN: auth_data[CONF_REFRESH_TOKEN],
-                        CONF_TOKEN_EXPIRY: auth_data[CONF_TOKEN_EXPIRY],
-                    },
-                )
+                # Replace (not merge) the data so pre-API-key credentials are dropped
+                data = dict(auth_data)
+                if device_id := reauth_entry.data.get(CONF_DEVICE_ID):
+                    data[CONF_DEVICE_ID] = device_id
+
+                return self.async_update_reload_and_abort(reauth_entry, data=data)
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=self.add_suggested_values_to_schema(
-                STEP_USER_DATA_SCHEMA,
-                {CONF_EMAIL: reauth_entry.data.get(CONF_EMAIL)},
-            ),
+            data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
         )
 
-    async def _authenticate(self, email: str, password: str) -> dict[str, Any]:
-        """Call the E.ON Next login endpoint and return token data."""
+    async def _try_authenticate(
+        self, api_key: str, errors: dict[str, str]
+    ) -> dict[str, Any] | None:
+        """Validate the API key; return entry data, or None with errors filled in."""
+        api_key = api_key.strip()
         session = async_get_clientsession(self.hass)
-
-        async with session.post(
-            AUTH_URL,
-            json={"email": email, "password": password},
-            headers={"X-API-KEY": API_KEY, "Content-Type": "application/json"},
-        ) as response:
-            if response.status in (401, 403, 404):
-                raise InvalidAuthError
-            response.raise_for_status()
-            body = await response.json()
-
-        return {
-            CONF_TOKEN: body["auth"]["token"],
-            CONF_REFRESH_TOKEN: body["auth"]["refreshToken"],
-            CONF_TOKEN_EXPIRY: body["auth"]["tokenExpiresIn"],  # Unix timestamp
-            CONF_ACCOUNT_NUMBER: body["accountNumber"],
-        }
+        try:
+            token, expiry = await async_obtain_token(session, api_key)
+            account_number = await async_get_account_number(session, token)
+        except aiohttp.ClientConnectionError:
+            errors["base"] = "cannot_connect"
+        except InvalidAuthError as err:
+            _LOGGER.debug("E.ON Next rejected the API key: %s", err)
+            errors["base"] = "invalid_auth"
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unexpected exception during E.ON Next authentication")
+            errors["base"] = "unknown"
+        else:
+            return {
+                CONF_API_KEY: api_key,
+                CONF_TOKEN: token,
+                CONF_TOKEN_EXPIRY: expiry,
+                CONF_ACCOUNT_NUMBER: account_number,
+            }
+        return None
 
 
 class EonNextHomeOptionsFlow(config_entries.OptionsFlow):
@@ -188,7 +155,3 @@ class EonNextHomeOptionsFlow(config_entries.OptionsFlow):
                 }
             ),
         )
-
-
-class InvalidAuthError(Exception):
-    """Raised when the email/password combination is rejected."""
