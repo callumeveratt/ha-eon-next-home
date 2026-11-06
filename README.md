@@ -43,9 +43,10 @@ Costs are E.ON Next's own half-hourly figures at your tariff's rates, VAT includ
 |--------|-------------|----------|
 | Smart Charge Status | Device registration status (`Live` / `Suspended`) | — |
 | Vehicle | Your registered EV name (e.g. Audi Q4 e-tron) | Diagnostic |
-| Smart Charge Window Start | Start time of the next planned charging window | — |
+| Smart Charge Window Start | Start time of the next planned charging window. Attributes `dispatches` (every planned slot: `start`, `end` in local ISO time, `kwh`, `source`, `location`, sorted by start) and `slot_count` | — |
 | Smart Charge Window End | End time of the last planned charging window | — |
 | Smart Charge Energy | Total kWh planned for the upcoming session | — |
+| Smart Charge Slot Count | Number of planned charging slots (0 when none) | — |
 | Battery Capacity | Vehicle battery size (kWh) | Diagnostic |
 | Charger Max Power | Charger rated power (kW) | Diagnostic |
 | Electricity Current Rate | Unit rate right now (GBP/kWh, inc. VAT). Attributes list the upcoming time-of-use windows | — |

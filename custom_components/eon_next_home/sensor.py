@@ -36,6 +36,7 @@ class EonNextEVSensorDescription(SensorEntityDescription):
     """Sensor description with a value extractor callable."""
 
     value_fn: Callable[[dict[str, Any]], Any] = lambda _: None
+    attrs_fn: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None
 
 
 def _first_ev_device(data: dict) -> dict:
@@ -47,6 +48,32 @@ def _first_ev_device(data: dict) -> dict:
 
 def _dispatches(data: dict) -> list[dict]:
     return data.get("plannedDispatches") or []
+
+
+def _local_iso(value: str) -> str:
+    return dt_util.as_local(datetime.fromisoformat(value)).isoformat()
+
+
+def _kwh(delta: Any) -> float | None:
+    return round(abs(float(delta)), 2) if delta not in (None, "") else None
+
+
+def _slot_attrs(data: dict) -> dict[str, Any]:
+    """Every planned dispatch, sorted by start, with local ISO times."""
+    slots = sorted(_dispatches(data), key=lambda x: datetime.fromisoformat(x["start"]))
+    return {
+        "dispatches": [
+            {
+                "start": _local_iso(x["start"]),
+                "end": _local_iso(x["end"]),
+                "kwh": _kwh(x.get("delta")),
+                "source": (x.get("meta") or {}).get("source"),
+                "location": (x.get("meta") or {}).get("location"),
+            }
+            for x in slots
+        ],
+        "slot_count": len(slots),
+    }
 
 
 def _flex(data: dict) -> dict:
@@ -79,6 +106,7 @@ SENSOR_DESCRIPTIONS: tuple[EonNextEVSensorDescription, ...] = (
             if (disp := _dispatches(d))
             else None
         ),
+        attrs_fn=_slot_attrs,
     ),
     EonNextEVSensorDescription(
         key="next_dispatch_end",
@@ -103,6 +131,13 @@ SENSOR_DESCRIPTIONS: tuple[EonNextEVSensorDescription, ...] = (
             if (disp := _dispatches(d))
             else None
         ),
+    ),
+    EonNextEVSensorDescription(
+        key="smart_charge_slot_count",
+        name="Smart Charge Slot Count",
+        icon="mdi:calendar-clock",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: len(_dispatches(d)),
     ),
     # ── Hardware info (diagnostic) ────────────────────────────────────────────
     EonNextEVSensorDescription(
@@ -174,6 +209,17 @@ class EonNextEVSensor(CoordinatorEntity[EonNextEVCoordinator], SensorEntity):
             return None
         try:
             return self.entity_description.value_fn(self.coordinator.data)
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra attributes, if the description defines any."""
+        attrs_fn = self.entity_description.attrs_fn
+        if attrs_fn is None or not self.coordinator.data:
+            return None
+        try:
+            return attrs_fn(self.coordinator.data)
         except (KeyError, TypeError, ValueError):
             return None
 
