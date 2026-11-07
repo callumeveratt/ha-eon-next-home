@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -32,6 +33,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BACKFILL_PROGRESS,
     CONF_STATISTICS_VERSION,
     CONSUMPTION_BACKFILL_DAYS,
     CONSUMPTION_OVERLAP_DAYS,
@@ -251,6 +253,10 @@ def _parse_reading(node: dict[str, Any]) -> Reading | None:
     return Reading(dt_util.as_utc(start), dt_util.as_utc(end), float(node["value"]), cost)
 
 
+def _floor_hour(when: datetime) -> datetime:
+    return when.replace(minute=0, second=0, microsecond=0)
+
+
 class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | None]]):
     """Imports half-hourly meter readings as external statistics.
 
@@ -297,63 +303,108 @@ class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | N
             for fuel in self.fuels:
                 latest[fuel] = await self._async_import_fuel(fuel, full)
             if full:
-                self.hass.config_entries.async_update_entry(
-                    self._entry,
-                    data={**self._entry.data, CONF_STATISTICS_VERSION: STATISTICS_VERSION},
-                )
+                data = {**self._entry.data, CONF_STATISTICS_VERSION: STATISTICS_VERSION}
+                data.pop(CONF_BACKFILL_PROGRESS, None)
+                self.hass.config_entries.async_update_entry(self._entry, data=data)
             return latest
 
+    def _save_backfill_progress(self, fuel: str, done_until: datetime) -> None:
+        """Record that a full re-import of `fuel` is written up to `done_until`."""
+        progress = dict(self._entry.data.get(CONF_BACKFILL_PROGRESS) or {})
+        progress[fuel] = done_until.isoformat()
+        self.hass.config_entries.async_update_entry(
+            self._entry, data={**self._entry.data, CONF_BACKFILL_PROGRESS: progress}
+        )
+
     async def _async_import_fuel(self, fuel: str, full: bool) -> datetime | None:
-        """Fetch readings since the last import (with overlap) and write statistics."""
+        """Fetch readings since the last import (with overlap) and write statistics.
+
+        Statistics are written a week at a time. A full re-import also records
+        how far it got, so if a request fails part-way the next run carries on
+        from there instead of fetching the whole history again.
+        """
         consumption_id = statistic_id(self.account_number, fuel, "consumption")
         cost_id = statistic_id(self.account_number, fuel, "cost")
-        recorder = get_instance(self.hass)
-
-        last = await recorder.async_add_executor_job(
-            get_last_statistics, self.hass, 1, consumption_id, True, {"sum"}
-        )
         now = dt_util.utcnow()
-        if last.get(consumption_id) and not full:
-            last_start = dt_util.utc_from_timestamp(last[consumption_id][0]["start"])
-            fetch_from = last_start - timedelta(days=CONSUMPTION_OVERLAP_DAYS)
-            bases = await self._async_sums_before(fetch_from, {consumption_id, cost_id})
-        else:
-            fetch_from = (now - timedelta(days=CONSUMPTION_BACKFILL_DAYS)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            bases = {}
-            _LOGGER.info("Backfilling E.ON Next %s readings; this can take a minute", fuel)
 
-        readings = await self._async_fetch_readings(fuel, fetch_from, now)
-        if uncosted := sum(r.cost is None for r in readings):
+        resume_from = None
+        if full:
+            saved = (self._entry.data.get(CONF_BACKFILL_PROGRESS) or {}).get(fuel)
+            resume_from = dt_util.parse_datetime(saved) if saved else None
+
+        if resume_from:
+            fetch_from = resume_from
+            bases = await self._async_sums_before(fetch_from, {consumption_id, cost_id})
+            _LOGGER.info("Resuming E.ON Next %s backfill from %s", fuel, fetch_from)
+        else:
+            last = await get_instance(self.hass).async_add_executor_job(
+                get_last_statistics, self.hass, 1, consumption_id, True, {"sum"}
+            )
+            if last.get(consumption_id) and not full:
+                last_start = dt_util.utc_from_timestamp(last[consumption_id][0]["start"])
+                fetch_from = last_start - timedelta(days=CONSUMPTION_OVERLAP_DAYS)
+                bases = await self._async_sums_before(fetch_from, {consumption_id, cost_id})
+            else:
+                fetch_from = (now - timedelta(days=CONSUMPTION_BACKFILL_DAYS)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                bases = {}
+                _LOGGER.info("Backfilling E.ON Next %s readings; this can take a minute", fuel)
+
+        sums = {
+            consumption_id: bases.get(consumption_id, 0.0),
+            cost_id: bases.get(cost_id, 0.0),
+        }
+        latest: datetime | None = None
+        total = uncosted = 0
+        async for window_end, readings in self._async_iter_readings(fuel, fetch_from, now):
+            total += len(readings)
+            uncosted += sum(r.cost is None for r in readings)
+            if readings:
+                self._write_statistics(fuel, readings, sums, consumption_id, cost_id)
+                batch_end = max(r.end for r in readings)
+                latest = batch_end if latest is None else max(latest, batch_end)
+            if full:
+                # Floor to the hour so a resumed run re-fetches any partial hour
+                self._save_backfill_progress(fuel, _floor_hour(window_end))
+
+        if uncosted:
             _LOGGER.warning(
                 "E.ON Next returned %d of %d %s half-hours without a cost; "
                 "they are imported with no cost",
                 uncosted,
-                len(readings),
+                total,
                 fuel,
             )
-        if not readings:
+        if latest is None:
             return self.data.get(fuel) if self.data else None
+        return latest
 
+    def _write_statistics(
+        self,
+        fuel: str,
+        readings: list[Reading],
+        sums: dict[str, float],
+        consumption_id: str,
+        cost_id: str,
+    ) -> None:
+        """Write one batch of readings as hourly statistics, advancing `sums`."""
         # Long-term statistics are hourly, so add each pair of half-hours together
         hourly_kwh: dict[datetime, float] = defaultdict(float)
         hourly_cost: dict[datetime, float] = defaultdict(float)
         for reading in readings:
-            hour = reading.start.replace(minute=0, second=0, microsecond=0)
+            hour = _floor_hour(reading.start)
             hourly_kwh[hour] += reading.kwh
             if reading.cost is not None:
                 hourly_cost[hour] += reading.cost
 
-        kwh_sum = bases.get(consumption_id, 0.0)
-        cost_sum = bases.get(cost_id, 0.0)
         kwh_rows: list[StatisticData] = []
         cost_rows: list[StatisticData] = []
         for hour in sorted(hourly_kwh):
-            kwh_sum += hourly_kwh[hour]
-            cost_sum += hourly_cost.get(hour, 0.0)
-            kwh_rows.append(StatisticData(start=hour, state=round(hourly_kwh[hour], 3), sum=round(kwh_sum, 3)))
-            cost_rows.append(StatisticData(start=hour, state=round(hourly_cost.get(hour, 0.0), 4), sum=round(cost_sum, 4)))
+            sums[consumption_id] += hourly_kwh[hour]
+            sums[cost_id] += hourly_cost.get(hour, 0.0)
+            kwh_rows.append(StatisticData(start=hour, state=round(hourly_kwh[hour], 3), sum=round(sums[consumption_id], 3)))
+            cost_rows.append(StatisticData(start=hour, state=round(hourly_cost.get(hour, 0.0), 4), sum=round(sums[cost_id], 4)))
 
         label = fuel.capitalize()
         async_add_external_statistics(
@@ -369,7 +420,6 @@ class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | N
         _LOGGER.debug(
             "Imported %d hours of E.ON Next %s readings from %s", len(kwh_rows), fuel, kwh_rows[0]["start"]
         )
-        return max(r.end for r in readings)
 
     async def _async_sums_before(self, when: datetime, stat_ids: set[str]) -> dict[str, float]:
         """Return each statistic's running sum just before `when`."""
@@ -389,20 +439,28 @@ class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | N
             if values
         }
 
-    async def _async_fetch_readings(
+    async def _async_iter_readings(
         self, fuel: str, start: datetime, end: datetime
-    ) -> list[Reading]:
-        """Fetch half-hourly measurements for every property, a week at a time."""
-        readings: list[Reading] = []
+    ) -> AsyncIterator[tuple[datetime, list[Reading]]]:
+        """Yield (window end, readings) a week at a time, across every property."""
+        # Skip straight to the first reading so a backfill doesn't walk
+        # through years of empty weeks before supply started
+        firsts: dict[str, datetime] = {}
         for property_id in self._tariffs.property_ids:
-            # Skip straight to the first reading so a backfill doesn't walk
-            # through years of empty weeks before supply started
             first = await self._async_query_measurements(property_id, fuel, start, end, 1)
-            if not first:
-                continue
-            chunk_start = max(start, first[0].start)
-            while chunk_start < end:
-                chunk_end = min(chunk_start + timedelta(days=MEASUREMENTS_CHUNK_DAYS), end)
+            if first:
+                firsts[property_id] = first[0].start
+        if not firsts:
+            return
+
+        # Whole hours, so no hour is split between two windows
+        chunk_start = _floor_hour(max(start, min(firsts.values())))
+        while chunk_start < end:
+            chunk_end = min(chunk_start + timedelta(days=MEASUREMENTS_CHUNK_DAYS), end)
+            readings: list[Reading] = []
+            for property_id, first in firsts.items():
+                if first >= chunk_end:
+                    continue
                 chunk = await self._async_query_measurements(
                     property_id, fuel, chunk_start, chunk_end, MEASUREMENTS_PAGE_SIZE
                 )
@@ -411,10 +469,10 @@ class EonNextConsumptionCoordinator(DataUpdateCoordinator[dict[str, datetime | N
                         property_id, fuel, chunk_start, chunk_end
                     )
                 readings += chunk
-                chunk_start = chunk_end
-                if chunk_start < end:
-                    await asyncio.sleep(1)  # be gentle during a backfill
-        return readings
+            yield chunk_end, readings
+            chunk_start = chunk_end
+            if chunk_start < end:
+                await asyncio.sleep(1)  # be gentle during a backfill
 
     async def _async_refetch_by_day(
         self, property_id: str, fuel: str, start: datetime, end: datetime

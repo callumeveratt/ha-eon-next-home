@@ -12,10 +12,12 @@ CONF_TOKEN_EXPIRY = "token_expiry"  # Unix timestamp
 CONF_ACCOUNT_NUMBER = "account_number"
 CONF_DEVICE_ID = "device_id"
 CONF_STATISTICS_VERSION = "statistics_version"
+# Per fuel, how far a full re-import has got, so a failed one resumes there
+CONF_BACKFILL_PROGRESS = "backfill_progress"
 
 # Polling interval — configurable via the integration's options flow
 CONF_SCAN_INTERVAL = "scan_interval"
-DEFAULT_SCAN_INTERVAL = 5   # minutes
+DEFAULT_SCAN_INTERVAL = 15  # minutes
 MIN_SCAN_INTERVAL = 2       # hard floor — below this risks rate-limiting
 
 # ── GraphQL ────────────────────────────────────────────────────────────────────
@@ -80,8 +82,9 @@ query GetEVData($accountNumber: String!) {
 # ── Energy (meter readings and tariffs) ────────────────────────────────────────
 # Tariffs change rarely; unitRates on a half-hourly tariff covers today and tomorrow.
 TARIFF_SCAN_INTERVAL = 60  # minutes
-# Meter readings arrive as a daily batch 1–2 days late, so polling often is pointless.
-CONSUMPTION_SCAN_INTERVAL = 120  # minutes
+# Meter readings arrive as a daily batch 1–2 days late, so once a day is enough
+# (each HA start also runs an import).
+CONSUMPTION_SCAN_INTERVAL = 24 * 60  # minutes
 # Each run re-imports this many days so late or corrected half-hours are picked up.
 CONSUMPTION_OVERLAP_DAYS = 3
 # How far back the first import looks. The API simply returns nothing before supply start.

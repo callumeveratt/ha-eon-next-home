@@ -28,7 +28,7 @@
 
 If you have a smart meter, the integration imports your half-hourly electricity and gas usage, and what E.ON Next charged for it, into Home Assistant's long-term statistics. No extra hardware is needed.
 
-E.ON Next only receives meter readings once a day, so the data is **1–2 days behind**. That's why it's imported as statistics against the half-hour it belongs to, rather than as a live sensor. On first setup it backfills everything back to when your E.ON Next supply started, which can take a minute. After that it checks for new readings every 2 hours, and re-imports the last 3 days each time so late or corrected readings are picked up.
+E.ON Next only receives meter readings once a day, so the data is **1–2 days behind**. That's why it's imported as statistics against the half-hour it belongs to, rather than as a live sensor. On first setup it backfills everything back to when your E.ON Next supply started, which can take a minute. If that first import is interrupted, the next run carries on where it stopped. After that it checks for new readings once a day (and on each Home Assistant start), and re-imports the last 3 days each time so late or corrected readings are picked up.
 
 To use it, go to **Settings → Dashboards → Energy**:
 
@@ -146,9 +146,9 @@ After updating, Home Assistant will show a **Re-authenticate** card for E.ON Nex
 ## How it works
 
 - All reads and writes use the **Kraken GraphQL API** (`api.eonnext-kraken.energy`) — the same endpoint E.ON Next's app backend is built on
-- EV data is polled on a configurable interval (default **5 minutes**, minimum 2 minutes). Tariffs are refreshed hourly and meter readings every 2 hours
+- EV data is polled on a configurable interval (default **15 minutes**, minimum 2 minutes). Tariffs are refreshed hourly and meter readings once a day
 - The scan interval can be changed at any time via the **Configure** button on the integration card in **Settings → Devices & Services**
-- ⚠️ Setting the interval too low may cause E.ON Next to rate-limit or block your account — 5 minutes is the recommended minimum
+- ⚠️ Setting the interval too low may cause E.ON Next to rate-limit or block your account — 15 minutes is recommended
 - Setting the **Target Charge** or **Ready By** entities writes back to the API immediately via the `setVehicleChargePreferences` mutation
 - Authentication exchanges your API key for short-lived Kraken access tokens (≈1 hour), which are renewed automatically
 - If E.ON Next rejects the API key (e.g. it was replaced by generating a new one), Home Assistant will prompt you to enter the new key
