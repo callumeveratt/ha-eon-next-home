@@ -17,7 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .auth import InvalidAuthError, async_obtain_token
+from .auth import InvalidAuthError, async_check_response, async_obtain_token
 from .const import (
     CONF_ACCOUNT_NUMBER,
     CONF_DEVICE_ID,
@@ -141,7 +141,7 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Content-Type": "application/json",
             },
         ) as response:
-            response.raise_for_status()
+            await async_check_response(response, "GraphQL mutation")
             result = await response.json()
 
         if "errors" in result:
@@ -247,7 +247,7 @@ class EonNextEVCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 async with self._token_lock:
                     await self._do_token_refresh()
                 return await self._graphql_query(query, variables, retried=True)
-            response.raise_for_status()
+            await async_check_response(response, "GraphQL query")
             result = await response.json()
 
         if "errors" in result:
